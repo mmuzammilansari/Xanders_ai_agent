@@ -13,18 +13,20 @@ def get_graph():
 
 def chat(query, session_id):
     history = sqlite.load_messages(session_id)
-    result = get_graph().invoke({"messages": history + [HumanMessage(content=query)]})
+    result = get_graph().invoke({
+        "messages": history + [HumanMessage(content=query)],
+    }, config={"configurable": {"session_id": session_id}})
     new_messages = result["messages"][len(history):]
     sqlite.append_messages(session_id, new_messages)
     # The supervisor often adds a closing line after the worker's answer.
     # Prefer the last worker answer; fall back to the last reply (e.g. greetings).
     for m in reversed(new_messages):
-        if is_answer(m) and m.name in WORKERS:
+        if is_answer(m) and getattr(m, "name", None) in WORKERS:
             return m.content
     return result["messages"][-1].content
 
 
-WORKERS = ("menu_agent", "complaint_agent")
+WORKERS = ("menu_agent", "complaint_agent", "order_agent")
 
 
 def is_answer(m):
@@ -43,3 +45,15 @@ def get_history(session_id):
         if item != (shown[-1] if shown else None):   # supervisor repeats the worker's answer
             shown.append(item)
     return shown
+
+def get_all_history():
+    sessions = {}
+    for session_id, message in sqlite.load_all_messages():
+        if message.type != "human" and not is_answer(message):
+            continue
+        item = {"role": "user" if message.type == "human" else "ai", "content": message.content.strip()}
+        messages = sessions.setdefault(session_id, [])
+        if item != (messages[-1] if messages else None):
+            messages.append(item)
+    return [{"session_id": session_id, "messages": messages}
+            for session_id, messages in sessions.items()]

@@ -30,6 +30,23 @@ def init_database():
                 status TEXT NOT NULL DEFAULT 'Pending'
             )
         """)
+        connection.execute("""
+                CREATE TABLE IF NOT EXISTS Orders (
+                order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                customer_name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'Pending'
+            )
+        """)
+        connection.execute("""
+                CREATE TABLE IF NOT EXISTS OrderItems (
+                item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL REFERENCES Orders(order_id) ON DELETE CASCADE,
+                item_name TEXT NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 1
+            )
+        """)
 
 def save_complaint(customer_name, order_id, phone, complaint):
     values = (customer_name, order_id, phone, complaint)
@@ -67,6 +84,13 @@ def load_messages(session_id):
         ).fetchall()
     return messages_from_dict([json.loads(row[0]) for row in rows])
 
+def load_all_messages():
+    with closing(connect()) as connection:
+        rows = connection.execute(
+            "SELECT session_id, message_json FROM messages ORDER BY id"
+        ).fetchall()
+    return [(session_id, messages_from_dict([json.loads(message_json)])[0])
+            for session_id, message_json in rows]
 
 def append_messages(session_id, messages):
     # One transaction: save all messages for a successful turn together.
@@ -77,3 +101,36 @@ def append_messages(session_id, messages):
         )
 
 
+def order(session_id, customer_name, phone, items):  # items = [("burger", 2), ("fries", 1)]
+    with closing(connect()) as connection, connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("BEGIN IMMEDIATE")
+        cursor = connection.execute(
+            "INSERT INTO Orders (session_id, customer_name, phone) VALUES (?, ?, ?)",
+            (session_id, customer_name, phone),
+        )
+        order_id = cursor.lastrowid
+        connection.executemany(
+            "INSERT INTO OrderItems (order_id, item_name, quantity) VALUES (?, ?, ?)",
+            [(order_id, name, qty) for name, qty in items],
+        )
+    return {"order_id": order_id, "status": "Pending"}
+
+
+
+# def order(session_id, customer_name, phone, items):
+#     items_json = json.dumps(items, sort_keys=True)  # ["burger", "fries"] -> string
+#     values = (session_id, customer_name, phone, items_json)
+#     with closing(connect()) as connection, connection:
+#         connection.execute("BEGIN IMMEDIATE")
+#         row = connection.execute(
+#             "SELECT order_id FROM Orders WHERE session_id=? AND customer_name=? AND phone=? AND items=?",
+#             values,
+#         ).fetchone()
+#         if row is None:
+#             cursor = connection.execute(
+#                 "INSERT INTO Orders (session_id, customer_name, phone, items) VALUES (?, ?, ?, ?)",
+#                 values,
+#             )
+#             row = (cursor.lastrowid,)
+#     return {"order_id": row[0], "status": "Pending"}

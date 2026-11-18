@@ -1,6 +1,7 @@
 """The same restaurant actions as Day 24, now described with @tool."""
 from langchain_core.tools import tool
-from core.database.sqlite import save_complaint
+from langchain_core.runnables import RunnableConfig
+from core.database.sqlite import order as save_order, save_complaint
 # from modules.knowledge.service import search_knowledge
 
 order_list = [
@@ -41,11 +42,37 @@ def get_discounts() -> dict:
         "message": "*** Today's Discount *** -- Buy 2 Zinger Burgers get 1 Club Sandwich"
     }
 
+@tool
+def place_order(customer_name: str, phone: str, items: list[dict],
+                config: RunnableConfig) -> dict:
+    """Place an order. Each item must contain a menu item name and positive quantity."""
+    session_id = config.get("configurable", {}).get("session_id")
+    if not session_id:
+        return {"error": "The chat session is missing; the order could not be saved."}
+    if not all(value.strip() for value in (customer_name, phone)):
+        return {"error": "Collect the customer name and phone before placing an order."}
+    menu_items = {item["name"].casefold() for item in fetch_menu.invoke({})}
+    normalized_items = []
+    for item in items:
+        name = item.get("name", "").strip()
+        quantity = item.get("quantity")
+        if name.casefold() not in menu_items:
+            return {"error": f"'{name}' is not on the menu."}
+        if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity < 1:
+            return {"error": "Each item quantity must be a positive whole number."}
+        normalized_items.append((name, quantity))
+    if not normalized_items:
+        result = {"error": "Add at least one menu item before placing an order."}
+    else:
+        result = save_order(session_id, customer_name.strip(), phone.strip(), normalized_items)
+    return result
+
 TOOLS = [
     fetch_menu,
     validate_order_id,
     log_complaint,
-    get_discounts
+    get_discounts,
+    place_order
 ]
 
 

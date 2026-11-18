@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from core.database.sqlite import init_database
 from fastapi.middleware.cors import CORSMiddleware
-
-
+# from fastapi import Request
+from modules.middlewares.authenticate import api_authenticate_key
 
 from modules.ai_agent.router import ai_agent_router
 
@@ -32,7 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+app.middleware("http")(api_authenticate_key)
 app.include_router(
     ai_agent_router,
     tags=["AI Module"]

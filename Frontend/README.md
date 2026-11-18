@@ -16,7 +16,9 @@ npm run dev
 ```
 
 Open http://localhost:3000. Set `BACKEND_URL` in `.env.local` if the backend is
-elsewhere, then restart Next.js. The value is server-only: the browser calls
+elsewhere. Set `SECRET_KEY` to the same value as `AUTHENTICATED_KEY` in
+`Backend/.env`, then restart both servers so they reload their environment. These
+values are server-only: the browser calls
 `/api/ai/chat` and `/api/ai/history`, and Next.js forwards to FastAPI. This avoids
 requiring CORS changes to the existing backend. Keep Next.js running as a Node
 server; this application does not use a static export.

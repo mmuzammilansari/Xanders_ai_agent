@@ -24,3 +24,7 @@ def initiate_chat(payload: chat_payload):
 @ai_agent_router.get("/history")
 def get_history(session_id: str):
     return {"session_id": session_id, "messages": service.get_history(session_id)}
+
+@ai_agent_router.get("/history/all")
+def get_all_history():
+    return {"messages": service.get_all_history()}
