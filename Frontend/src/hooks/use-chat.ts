@@ -128,6 +128,7 @@ export function useChat() {
     select: (id: string | null) => dispatch({ type: "select", id }),
     rename: (id: string, title: string) => dispatch({ type: "rename", id, title }),
     restore: (id: string) => {
+      if (!/^[A-Za-z0-9_-]{1,200}$/.test(id)) return;
       dispatch({ type: "add", session: state.sessions.find((s) => s.id === id) || { id, title: `Restored conversation · ${id.slice(0, 8)}`, updatedAt: Date.now() } });
       void loadHistory(id);
     },

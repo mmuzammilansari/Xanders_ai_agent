@@ -57,3 +57,12 @@ def get_all_history():
             messages.append(item)
     return [{"session_id": session_id, "messages": messages}
             for session_id, messages in sessions.items()]
+
+def get_order(order_id):
+    orders = sqlite.load_orders(order_id)
+    if not orders:
+        return {"error": "Order not found."}
+    return orders[0]
+
+def get_all_orders():
+    return sqlite.load_all_orders()

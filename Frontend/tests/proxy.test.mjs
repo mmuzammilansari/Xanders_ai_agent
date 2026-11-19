@@ -68,7 +68,7 @@ test('production proxy: real forwarding, validation and safe failures', { timeou
     assert.equal(requests.length, count);
   });
   await t.test('does not expose upstream errors or credentials', async () => {
-    for (const [status, expected] of [[500, 502], [429, 429], [422, 422]]) {
+    for (const [status, expected] of [[500, 502], [429, 429], [422, 422], [404, 404]]) {
       backendStatus = status;
       const res = await post({ query: 'Hi', session_id: 'a' });
       assert.equal(res.status, expected);
@@ -76,6 +76,11 @@ test('production proxy: real forwarding, validation and safe failures', { timeou
       assert.ok(!text.includes('secret-provider-token'));
       assert.ok(JSON.parse(text).error);
     }
+  });
+  await t.test('gives a useful message for missing resources and orders', async () => {
+    backendStatus = 404;
+    const missingResource = await post({ query: 'Hi', session_id: 'a' });
+    assert.equal((await missingResource.json()).error, 'The requested assistant resource could not be found.');
   });
   await t.test('unavailable backend yields a helpful service error', async () => {
     await new Promise((resolve) => fixture.close(resolve));

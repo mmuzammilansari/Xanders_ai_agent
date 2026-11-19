@@ -15,14 +15,14 @@ async def api_authenticate_key(request: Request, call_next):
         return await call_next(request)
     
     api_key = request.headers.get("X-API-KEY")
-    expected_key = os.getenv("AUTHENTICATED_KEY")
+    expected_key = os.getenv("AUTHENTICATED_KEY") or os.getenv("SECRET_KEY")
 
     # Keep local development and health checks usable when authentication is
     # not configured; when configured, require a supplied matching key.
     if expected_key and (not api_key or not secrets.compare_digest(api_key, expected_key)):
         return JSONResponse(
             status_code=403,
-            content={"message": "Unauthorized request"},
+            content={"detail": "Backend API key is missing or invalid."},
         )
     return await call_next(request)
     # if "X-API_KEY" in request.headers and request.headers["X-API-KEY"] == os.getenv("AUTHENTICATED_KEY"):

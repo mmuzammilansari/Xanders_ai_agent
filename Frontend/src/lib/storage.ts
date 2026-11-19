@@ -6,7 +6,7 @@ export function readSessions(): { sessions: Session[]; activeId: string | null }
     const value = JSON.parse(localStorage.getItem(KEY) || "null");
     if (!value || !Array.isArray(value.sessions)) return { sessions: [], activeId: null };
     const sessions: Session[] = value.sessions.filter((s: Session) => s && typeof s.id === "string" &&
-      s.id.length > 0 && s.id.length <= 200 && typeof s.title === "string" && typeof s.updatedAt === "number");
+      /^[A-Za-z0-9_-]{1,200}$/.test(s.id) && typeof s.title === "string" && typeof s.updatedAt === "number");
     return { sessions, activeId: sessions.some((s) => s.id === value.activeId) ? value.activeId : null };
   } catch { return { sessions: [], activeId: null }; }
 }

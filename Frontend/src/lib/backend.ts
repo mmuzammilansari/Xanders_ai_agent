@@ -44,8 +44,7 @@ function buildHeaders(init?: RequestInit): Headers {
   }
 
   // API key hamesha server se aaye, caller se nahi
-  // SECRET_KEY is the existing frontend setting; AUTHENTICATED_KEY is the
-  // backend's canonical name. Both must match Backend/.env.
+  // Both names are accepted by the backend; prefer its canonical name.
   const apiKey = process.env.AUTHENTICATED_KEY || process.env.SECRET_KEY;
   if (apiKey) headers.set("X-API-KEY", apiKey);
   else headers.delete("X-API-KEY");
@@ -77,17 +76,25 @@ export async function forward(path: string, init?: RequestInit): Promise<Respons
     });
 
     if (!response.ok) {
-      // Provider errors, stack traces ya credentials client ko expose nahi karne
-      console.error(`[forward] backend ${response.status} for ${url.pathname}`);
+      // Record upstream diagnostics server-side, without returning them to users.
+      const upstreamBody = await response.text().catch(() => "");
+      console.error(`[forward] backend ${response.status} for ${url.pathname}: ${upstreamBody.slice(0, 2000)}`);
 
       if (response.status === 429) {
         return fail("The assistant is busy. Please wait a moment, then reload history.", 429);
       }
-      // 401/403 ka matlab hamari API key ka masla hai, user ka nahi
-      const status = response.status >= 500 || response.status === 401 || response.status === 403
-        ? 502
-        : response.status;
-      return fail("The assistant couldn’t complete this request. Reload history before sending again.", status);
+      if (response.status === 404) {
+        const isOrderLookup = /\/order\/[^/]+$/.test(url.pathname);
+        return fail(
+          isOrderLookup ? "That order could not be found. Check the order ID and try again." : "The requested assistant resource could not be found.",
+          404,
+        );
+      }
+      if (response.status === 401 || response.status === 403) {
+        return fail("The assistant service rejected its server credentials. Check that the frontend server key matches AUTHENTICATED_KEY in Backend/.env, then restart both services.", 502);
+      }
+      const status = response.status >= 500 ? 502 : response.status;
+      return fail("The assistant couldn't complete this request. Reload history before sending again.", status);
     }
 
     if (response.status === 204) {
@@ -117,6 +124,6 @@ export async function forward(path: string, init?: RequestInit): Promise<Respons
     }
 
     console.error("[forward] fetch failed:", error);
-    return fail("We couldn’t connect to the assistant service. Make sure FastAPI is running and reload history.", 503);
+    return fail("We couldn't connect to the assistant service. Make sure FastAPI is running and reload history.", 503);
   }
 }

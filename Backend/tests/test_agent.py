@@ -40,6 +40,8 @@ class FakeModel:
 
 class AgentTests(unittest.TestCase):
     def setUp(self):
+        self.patch_auth = patch.dict("os.environ", {"AUTHENTICATED_KEY": "", "SECRET_KEY": ""})
+        self.patch_auth.start()
         self.tmp = tempfile.TemporaryDirectory()
         self.folder = Path(self.tmp.name)
         self.patch_data = patch.object(settings, "DATA_DIR", self.folder)
@@ -58,6 +60,7 @@ class AgentTests(unittest.TestCase):
         self.patch_graph.stop()
         self.patch_db.stop()
         self.patch_data.stop()
+        self.patch_auth.stop()
         self.tmp.cleanup()
 
     def test_tool_loop_and_history_survive_new_client(self):
@@ -86,6 +89,62 @@ class AgentTests(unittest.TestCase):
             response = self.client.post("/ai/chat", json={"query": "hello", "session_id": "failed"})
         self.assertEqual(response.status_code, 503)
         self.assertEqual(sqlite.load_messages("failed"), [])
+
+    def test_authentication_accepts_either_configured_key_name(self):
+        with patch.dict("os.environ", {"AUTHENTICATED_KEY": "backend-secret", "SECRET_KEY": ""}):
+            denied = self.client.get("/ai/history", params={"session_id": "sam"})
+            allowed = self.client.get("/ai/history", params={"session_id": "sam"}, headers={"X-API-KEY": "backend-secret"})
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 200)
+        with patch.dict("os.environ", {"AUTHENTICATED_KEY": "", "SECRET_KEY": "frontend-secret"}):
+            allowed = self.client.get("/ai/history", params={"session_id": "sam"}, headers={"X-API-KEY": "frontend-secret"})
+        self.assertEqual(allowed.status_code, 200)
+
+    def test_order_tool_saves_order_and_items(self):
+        from modules.ai_agent.tools import place_order
+
+        result = place_order.invoke({
+            "customer_name": "Sam",
+            "phone": "03000000000",
+            "items": [{"name": "Zinger Burger", "quantity": 2}],
+        }, config={"configurable": {"session_id": "order-session"}})
+        self.assertEqual(result["status"], "Pending")
+        with closing(sqlite.connect()) as connection:
+            order = connection.execute(
+                "SELECT session_id, customer_name, phone FROM Orders WHERE order_id=?",
+                (result["order_id"],),
+            ).fetchone()
+            items = connection.execute(
+                "SELECT item_name, quantity FROM OrderItems WHERE order_id=?",
+                (result["order_id"],),
+            ).fetchall()
+        self.assertEqual(order, ("order-session", "Sam", "03000000000"))
+        self.assertEqual(items, [("Zinger Burger", 2)])
+        from modules.ai_agent.service import get_order
+        self.assertEqual(get_order(result["order_id"]), {
+            "order_id": result["order_id"],
+            "session_id": "order-session",
+            "customer_name": "Sam",
+            "phone": "03000000000",
+            "status": "Pending",
+            "items": [{"name": "Zinger Burger", "quantity": 2}],
+        })
+        self.assertEqual(get_order(-1), {"error": "Order not found."})
+
+    def test_migrates_legacy_orders_named_chat_history(self):
+        with closing(sqlite.connect()) as connection, connection:
+            connection.execute('DROP TABLE "Orders"')
+            connection.execute('DROP TABLE messages')
+            connection.execute('CREATE TABLE "Orders" (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, message_json TEXT NOT NULL)')
+            connection.execute('INSERT INTO "Orders" (session_id, message_json) VALUES (?, ?)', ("legacy", '{"type":"human","data":{"content":"hello"}}'))
+        sqlite.init_database()
+        with closing(sqlite.connect()) as connection:
+            self.assertEqual(connection.execute('SELECT session_id, message_json FROM messages').fetchall(), [
+                ("legacy", '{"type":"human","data":{"content":"hello"}}')
+            ])
+            order_columns = {row[1] for row in connection.execute('PRAGMA table_info("Orders")')}
+            self.assertTrue({"customer_name", "phone", "session_id"}.issubset(order_columns))
+        self.assertEqual(sqlite.load_messages("legacy")[0].content, "hello")
 
     def test_provider_and_loop_limit_return_502_without_saving(self):
         errors = [

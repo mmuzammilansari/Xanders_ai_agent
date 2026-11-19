@@ -12,6 +12,23 @@ def connect():
 
 def init_database():
     with closing(connect()) as connection, connection:
+        # Older versions accidentally used the name `Orders` for chat history.
+        # Migrate it before creating the real order tables, preserving all rows.
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        if "Orders" in tables:
+            columns = {row[1] for row in connection.execute('PRAGMA table_info("Orders")')}
+            if {"session_id", "message_json"}.issubset(columns) and not {"customer_name", "phone"}.issubset(columns):
+                if "messages" not in tables:
+                    connection.execute('ALTER TABLE "Orders" RENAME TO messages')
+                else:
+                    connection.execute(
+                        'INSERT INTO messages (session_id, message_json) '
+                        'SELECT session_id, message_json FROM "Orders"'
+                    )
+                    connection.execute('DROP TABLE "Orders"')
+
         connection.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +64,7 @@ def init_database():
                 quantity INTEGER NOT NULL DEFAULT 1
             )
         """)
+        connection.execute("PRAGMA user_version = 1")
 
 def save_complaint(customer_name, order_id, phone, complaint):
     values = (customer_name, order_id, phone, complaint)
@@ -84,6 +102,49 @@ def load_messages(session_id):
         ).fetchall()
     return messages_from_dict([json.loads(row[0]) for row in rows])
 
+def load_orders(order_id):
+    with closing(connect()) as connection:
+        order_row = connection.execute(
+            "SELECT order_id, session_id, customer_name, phone, status "
+            "FROM Orders WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()
+        if order_row is None:
+            return []
+        items = connection.execute(
+            "SELECT item_name, quantity FROM OrderItems "
+            "WHERE order_id = ? ORDER BY item_id",
+            (order_id,),
+        ).fetchall()
+    return [{
+        "order_id": order_row[0],
+        "session_id": order_row[1],
+        "customer_name": order_row[2],
+        "phone": order_row[3],
+        "status": order_row[4],
+        "items": [{"name": name, "quantity": quantity} for name, quantity in items],
+    }]
+    
+def load_all_orders():
+    with closing(connect()) as connection:
+        order_rows = connection.execute(
+            "SELECT order_id, session_id, customer_name, phone, status FROM Orders ORDER BY order_id"
+        ).fetchall()
+        orders = []
+        for order_row in order_rows:
+            items = connection.execute(
+                "SELECT item_name, quantity FROM OrderItems WHERE order_id = ? ORDER BY item_id",
+                (order_row[0],),
+            ).fetchall()
+            orders.append({
+                "order_id": order_row[0],
+                "session_id": order_row[1],
+                "customer_name": order_row[2],
+                "phone": order_row[3],
+                "status": order_row[4],
+                "items": [{"name": name, "quantity": quantity} for name, quantity in items],
+            })
+    return orders
 def load_all_messages():
     with closing(connect()) as connection:
         rows = connection.execute(
